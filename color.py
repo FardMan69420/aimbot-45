@@ -1,73 +1,116 @@
-import mss
-import numpy as np
 import cv2
-from os import system
+import numpy as np
+from mss import mss
+from pil import Image
+import imutils
 import time
-from pynput.mouse import Button, Controller
+from win32 import win32api
+import win32con
+import keyboard
 
-# CONFIG
-fullDimensionX         = 1920 # CHANGE IF YOUR MONITOR ISN'T 1920x1080, UNTESTED
-fullDimensionY         = 1080 # CHANGE IF YOUR MONITOR ISN'T 1920x1080, UNTESTED
-blursize               = 10   # SIZE OF BLUR
-boxsize                = int(input("DIMENSION OF BOX >  "))
+time.sleep(3)
 
-# OPENCV TEXT CONFIG
-font                   = cv2.FONT_HERSHEY_COMPLEX_SMALL
-bottomLeftCornerOfText = (10,30)
-fontScale              = 0.75
-fontColor              = (0,0,255)
-lineType               = 2
+sct = mss()
+monX = 1920
+monY = 1080
+boxsize = 290
+kernel = np.ones((5, 5), "uint8")
 
-mouse = Controller() # STARTS MOUSE
+#--- red ---#
+# lower = np.array([0,81,130])
+# upper = np.array([4,255,188])
 
-# CALCULATES THE BOX SIZE BASED ON fullDimensionX, fullDimensionY, and boxsize
-top = int(((fullDimensionY / 2) - (boxsize / 2)))
-left = int(((fullDimensionX / 2) - (boxsize / 2)))
-width = int(boxsize)
-height = int(boxsize)
+#--- magenta ---#
+lower = np.array([139,96,129])
+upper = np.array([169,255,255])
+
+def grab():
+    # change your monitor to 1 if you aren't screenlocked like me
+    mon2 = sct.monitors[2]
+    box = {
+        'top': mon2['top'] + int(((monY / 2) - (boxsize / 2))),
+        'left': mon2['left'] + int(((monX / 2) - (boxsize / 2))),
+        'width': boxsize,
+        'height': boxsize,
+    }
+    sct_img = sct.grab(box)
+    input = np.array(sct_img)
+    return input
+
+def mouse_move(x, y):
+    # win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0)
+    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, x, y, 0, 0)
+    # win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,0,0)
+
+def process():
+    # hsv = cv2.cvtColor(input, cv2.COLOR_BGR2HSV)
+    # hsv = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY)
+    # img_gray = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(input, cv2.COLOR_BGR2HSV)
+    red_mask = cv2.inRange(hsv, lower, upper)
+    # red_mask = cv2.dilate(red_mask, kernel)
+    res_red = cv2.bitwise_and(red_mask, red_mask, 
+                              mask = red_mask)
+
+    contours, hierarchy = cv2.findContours(red_mask, cv2.RETR_TREE,
+                                   cv2.CHAIN_APPROX_SIMPLE)
+
+    blank = np.zeros(res_red.shape[:2],
+                    dtype='uint8')
+ 
+    final = cv2.drawContours(blank, contours, -1,
+                   (255, 0, 0), 1)
+
+    if len(contours) != 0:
+        maximum = max(contours, key = cv2.contourArea)
+        x,y,w,h = cv2.boundingRect(maximum)
+        # draw the biggest contour (c) in green
+        cv2.rectangle(input,(x,y),(x+w,y+h),(0, 255, 0), 2)
+        # cv2.drawContours(final, contours, -1, (0,255,0), 3)
+
+        testx = int(x + (1/2 * w))
+        testy = int(y + (1/2 * h))
+
+        cv2.circle(input, (testx,testy), 4, (0, 255, 0), -1)
+
+        moment = cv2.moments(final)
+        if moment["m00"] == 0:
+            return
+        cx = int(moment["m10"] / moment["m00"])
+        cy = int(moment["m01"] / moment["m00"])
+
+        mid = boxsize / 2
+        x = -(mid - cx) if cx < mid else cx - mid
+        y = -(mid - cy) if cy < mid else cy - mid
+
+        # cx = -(mid - cx)
+        # cy = -(mid - cy)
+
+        # cv2.circle(input, (cx, cy), 5, (255, 255, 255), -1)
+        # cv2.circle(input, (cx, cy), 4, (0, 0, 255), -1)
+        # cv2.circle(input, (int(x), int(y)), 16, (0, 0, 255), -1)
+        # mouse_move(int(x), int(y + 5))
+        if is_activated():
+            mouse_move(int(x), int(y))
+    return res_red, final
+
+def gettarget(target):
+    # does stuff
+    pass
+
+def is_activated():
+    return win32api.GetAsyncKeyState(0x05) != 0
 
 while True:
-    with mss.mss() as sct:
-        monitor = {'top': top, 'left': left, 'width': width, 'height': height}
-        img = np.array(sct.grab(monitor))
-        framespersecond = str(cv2.CAP_PROP_FPS)
-        cv2.putText(img,framespersecond, 
-            bottomLeftCornerOfText, 
-            font, 
-            fontScale,
-            fontColor,
-            lineType)
+    input = grab()
+    cx = 0
+    cy = 0
+    # cv2.imshow('frame', input)
+    res_red, final = process()
+    cv2.imshow('res_red', res_red)
+    cv2.imshow('final', final)
+    cv2.imshow('input', input)
 
-        cv2.imshow('img', np.array(img))
-
-        blur = cv2.blur(src=img, ksize=(blursize, blursize))
-        cv2.imshow('blur', blur)
-
-        hsv = cv2.cvtColor(np.array(blur), cv2.COLOR_BGR2HSV)
-
-        # RED_MIN = np.array([130, 0, 0]) # BGR ORDER
-        # RED_MAX = np.array([255, 80, 80]) # BGR ORDER
-        # starting colors - lower_red = np.array([0,50,50])
-        # starting colors - upper_red = np.array([15,255,255])
-        lower_red = np.array([7,90,35])
-        upper_red = np.array([345,100,100])
-        mask = cv2.inRange(hsv, lower_red, upper_red)
-        res = cv2.bitwise_and(np.array(img), np.array(img), mask=mask)
-        # cv2.imshow('mask', mask)
-        # cv2.imshow('res', res)
-        gray = cv2.cvtColor(res, cv2.COLOR_BGR2GRAY)
-        # cv2.imshow('gray', gray)
-        pixels = cv2.countNonZero(gray)
-        print(np.average(pixels), 'pixels found')
-
-        if np.average(pixels) > 20:
-            mouse.press(Button.left)
-            mouse.release(Button.left)
-            print('clicked!')
-
-    if (cv2.waitKey(1) & 0xFF) == ord('q'):
-        print("exiting...")
-        time.sleep(0.5)
-        system('cls')
+    if (cv2.waitKey(1) & 0xFF) == ord("q"):
         cv2.destroyAllWindows()
         break
